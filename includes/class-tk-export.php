@@ -390,8 +390,8 @@ XML;
     <dc:creator>{$this->wxr_cdata(get_the_author_meta('login'))}</dc:creator>
     <guid isPermaLink="false">$guid</guid>
     <description></description>
-    <content:encoded>$content;</content:encoded>
-    <excerpt:encoded>$excerpt;</excerpt:encoded>
+    <content:encoded>{$content}</content:encoded>
+    <excerpt:encoded>{$excerpt}</excerpt:encoded>
     <wp:post_id>{$this->intval($post->ID)}</wp:post_id>
     <wp:post_date>{$this->wxr_cdata($post->post_date)}</wp:post_date>
     <wp:post_date_gmt>{$this->wxr_cdata($post->post_date_gmt)}</wp:post_date_gmt>
