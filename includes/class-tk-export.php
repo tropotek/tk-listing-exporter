@@ -133,8 +133,8 @@ class Tk_Export
                 $this->args['content'] = 'post';
             }
             //$where = $this->wpdb->prepare("{$this->wpdb->posts}.post_type = %s", 'listings');
-            $where = $this->wpdb->prepare("{$this->wpdb->posts}.post_type = %s", $this->args['content']);
-            //$where = $this->wpdb->prepare("({$this->wpdb->posts}.post_type = %s OR {$this->wpdb->posts}.post_type = 'attachment')", $this->args['content']);
+            //$where = $this->wpdb->prepare("{$this->wpdb->posts}.post_type = %s AND {$this->wpdb->posts}.post_status = %s ", $this->args['content'], 'publish');
+            $where = $this->wpdb->prepare("({$this->wpdb->posts}.post_type = %s OR {$this->wpdb->posts}.post_type = 'attachment')", $this->args['content']);
 
 //            $where = $this->wpdb->prepare("({$this->wpdb->posts}.post_type = %s OR ( {$this->wpdb->posts}.post_type = 'attachment' AND {$this->wpdb->posts}.post_parent IN (
 //    SELECT ID FROM {$this->wpdb->posts} WHERE 1
@@ -146,7 +146,7 @@ class Tk_Export
             $where = $this->wpdb->prepare("{$this->wpdb->posts}.post_type IN (" . implode(',', $esses) . ')', $post_types);
         }
 
-        if ($this->args['status'] && ('post' == $this->args['content'] || 'page' == $this->args['content'])) {
+        if ($this->args['status'] && ('listings' == $this->args['content'] || 'post' == $this->args['content'] || 'page' == $this->args['content'])) {
             $where .= $this->wpdb->prepare(" AND {$this->wpdb->posts}.post_status = %s", $this->args['status']);
         } else {
             $where .= " AND {$this->wpdb->posts}.post_status != 'auto-draft'";
@@ -175,9 +175,18 @@ class Tk_Export
             }
         }
 
+        $limit = '';
+        if (isset($this->args['limit'])) {
+            $limit = 'Limit ' . $this->args['limit'];
+            if (isset($this->args['offset'])) {
+                $limit = 'Limit ' . $this->args['offset'] . ', ' . $this->args['limit'];;
+            }
+        }
+
         // Grab a snapshot of post IDs, just in case it changes during the export.
-        $sql = "SELECT ID FROM {$this->wpdb->posts} $join WHERE $where";
-        //error_log($sql);
+        $sql = "SELECT ID FROM {$this->wpdb->posts} $join WHERE $where $limit";
+//        error_log(print_r($this->args, true));
+//        error_log($sql);
         $post_ids = $this->wpdb->get_col($sql);
 
         // Get all attachments
@@ -390,8 +399,8 @@ XML;
     <dc:creator>{$this->wxr_cdata(get_the_author_meta('login'))}</dc:creator>
     <guid isPermaLink="false">$guid</guid>
     <description></description>
-    <content:encoded>$content;</content:encoded>
-    <excerpt:encoded>$excerpt;</excerpt:encoded>
+    <content:encoded>{$content}</content:encoded>
+    <excerpt:encoded>{$excerpt}</excerpt:encoded>
     <wp:post_id>{$this->intval($post->ID)}</wp:post_id>
     <wp:post_date>{$this->wxr_cdata($post->post_date)}</wp:post_date>
     <wp:post_date_gmt>{$this->wxr_cdata($post->post_date_gmt)}</wp:post_date_gmt>

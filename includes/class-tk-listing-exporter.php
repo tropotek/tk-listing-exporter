@@ -189,56 +189,145 @@ class Tk_Listing_Exporter {
 	private function define_public_hooks() {
 
 //		$plugin_public = new Tk_Listing_Exporter_Public( $this->get_plugin_name(), $this->get_version() );
-
         $this->loader->add_action( 'init', $this, 'init_exporter');
 
 	}
 
 	public function init_exporter()
 	{
-
         if (isset($_GET['tk-listing-exporter']) ) {
             $errorMsg = 'Unknown Export Error';
-            // A request from a client has occured
             // Find the client record
             $secret = !empty($_GET['tk-listing-exporter']) ? $_GET['tk-listing-exporter'] : '';
-            $lockPath = ABSPATH . '/wp-content/uploads/';
             if ($secret) {
-                //$client = tk_get_by_secret_ExportClient(urldecode($secret));
                 $client = tk_get_by_secret_ExportClient($this->decrypt(urldecode($secret)));
                 if ($client && $client->active) {
-                    if (WP_DEBUG) {
-                        error_log('------------> Initialising Listing Exporter for: ' . $client->name);
-                    }
                     $exporter = new Tk_Export();
                     $args = array(
-                        'content' => 'listings'
+                        'content' => 'listings',
+                        'status' => 'publish'
                     );
                     if ($client->author_id)
                         $args['author'] = (int)$client->author_id;
                     $args = apply_filters( 'export_args', $args );
-                    header('Content-Type: text/xml; charset=' . get_option('blog_charset'), true);
-                    $xml = $exporter->export($args);
-                    echo $xml;
-
-					//  Update client export timestamp
-					$now = new DateTime('now');
-					$client->last_cache = $now->format('Y-m-d H:i:s');
-					tk_save_ExportClient((array)$client);
-
-					//@unlink($lockFile);
+                    //error_log(print_r($_GET, true));
+                    if (isset($_GET['zip'])) {
+                        $err = $this->getZip($args, $exporter, $client);
+                    } else {
+                        $err = $this->getXml($args, $exporter);
+                    }
+                    if (!count($err)) {
+                        //  Update client export timestamp
+                        $now = new DateTime('now');
+                        $client->last_cache = $now->format('Y-m-d H:i:s');
+                        tk_save_ExportClient((array)$client);
+                    }
                     exit();
                 }
                 $errorMsg = 'Error: Contact your listing administrator as your account is not active.';
             }
-            global $wp_query;
-            //$wp_query->set_404();
             status_header(500);
             echo $errorMsg;
-            //wp_ob_end_flush_all();
             exit();
         }
 	}
+
+    /**
+     * @param array $args
+     * @param Tk_Export $exporter
+     * @return array
+     */
+	protected function getXml($args, $exporter)
+    {
+        $err = array();
+        header('Content-Type: text/xml; charset=' . get_option('blog_charset'), true);
+        $xml = $exporter->export($args);
+        echo $xml;
+        return $err;
+    }
+
+    /**
+     * @param array $args
+     * @param Tk_Export $exporter
+     * @param array $client
+     * @return array
+     */
+    protected function getZip($args, $exporter, $client)
+    {
+        $err = array();
+        $total = $this->getListingsCount($args);
+        $limit = 10;
+        $pages = floor($total/$limit);
+
+        // save all XML`s to text files
+        $tmpDir =  ABSPATH . 'wp-content/uploads/tk-exporter/export-' . $client->author_id;
+        if (is_dir($tmpDir)) $this->rrmdir($tmpDir);
+        @mkdir($tmpDir, 0700, true);
+
+        $zipfile = $tmpDir . '/export.zip';
+        $zip = new ZipArchive();
+        if($zip->open($zipfile, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== TRUE) {
+            $errMsg = "Could not Create $zipfile";
+            $err[] = $errMsg;
+            error_log($errMsg);
+            return $err;
+        }
+
+        for($i = 0; $i<=$pages;$i++) {
+            $offset = ($i*($limit));
+            if (WP_DEBUG) {
+                $offsetEnd = ($limit + ($limit * $i));
+                if ($offsetEnd > $total) $offsetEnd = $total;
+                error_log( '[' . memory_get_usage(). '] Process: ' . $offset . ' - ' . $offsetEnd);
+            }
+
+            $args['limit'] = $limit;
+            $args['offset'] = $offset;
+            $xml = $exporter->export($args);
+            $filename = $tmpDir . '/export-' . $i . '.xml';
+            file_put_contents($filename, $xml);
+            $zip->addFile($filename, 'export-' . $i . '.xml');
+            unset($xml);
+            gc_collect_cycles();
+        }
+
+        $zip->close();
+
+        // TODO: stream the new zip file
+        header( "Content-Type: application/x-zip" );
+        header( "Content-Disposition: attachment; filename=\"tk-export-file.zip\"" );
+        @readfile($zipfile);
+
+        // delete folder
+        $this->rrmdir($tmpDir);
+
+        return $err;
+    }
+
+
+
+
+
+	protected function getListingsCount($args)
+    {
+        global $wpdb;
+        $where = "wp_posts.post_type = 'listings' AND wp_posts.post_status = 'publish' ";
+        if ($args['status'] && ('listings' == $args['content'] || 'post' == $args['content'] || 'page' == $args['content'])) {
+            $where .= $wpdb->prepare(" AND {$wpdb->posts}.post_status = %s", $args['status']);
+        } else {
+            $where .= " AND {$wpdb->posts}.post_status != 'auto-draft'";
+        }
+        if (isset($args['author'])) {
+                $where .= $wpdb->prepare(" AND {$wpdb->posts}.post_author = %d", $args['author']);
+        }
+        $sql = "SELECT *
+FROM wp_posts
+WHERE $where ";
+        $post_ids = $wpdb->get_col($sql);
+
+        return count($post_ids);
+    }
+
 
     public function decrypt($crypted_token)
     {
@@ -290,5 +379,21 @@ class Tk_Listing_Exporter {
 	public function get_version() {
 		return $this->version;
 	}
+
+    function rrmdir($dir)
+    {
+        if (is_dir($dir)) {
+            $objects = scandir($dir);
+            foreach ($objects as $object) {
+                if ($object != "." && $object != "..") {
+                    if (is_dir($dir . DIRECTORY_SEPARATOR . $object) && !is_link($dir . "/" . $object))
+                        $this->rrmdir($dir . DIRECTORY_SEPARATOR . $object);
+                    else
+                        unlink($dir . DIRECTORY_SEPARATOR . $object);
+                }
+            }
+            rmdir($dir);
+        }
+    }
 
 }

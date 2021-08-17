@@ -30,7 +30,7 @@ class Tk_Listing_Exporter_Deactivator {
 	 * @since    1.0.0
 	 */
 	public static function deactivate($plugin_name) {
-		delete_option($plugin_name);
+		//delete_option($plugin_name);
 
 	}
 
